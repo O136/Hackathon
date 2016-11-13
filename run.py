@@ -124,14 +124,16 @@ def vote_activity():
     data = bottle.request.json
     if data['ups'] == '1':
         decision = 'ups'
+        db['Trip'].update_one({'name': data['trip_name'], 'activities': {'$elemMatch': {'name': data['name']}}},
+                              {'$pull': {'activities.$.ups':data['user'], 'activities.$.downs': data['user']}})
     else:
         decision = 'downs'
+        db['Trip'].update_one({'name': data['trip_name'], 'activities': {'$elemMatch': {'name': data['name']}}},
+                              {'$pull': {'activities.$.ups': data['user'], 'activities.$.downs': data['user']}})
+
 
     db['Trip'].update_one({'name': data['trip_name'], 'activities': {'$elemMatch': {'name': data['name']}}},
-                                   {'$set': {'activities.$.ups': [], 'activities.$.downs': []}})
-
-    db['Trip'].update_one({'name': data['trip_name'], 'activities': {'$elemMatch': {'name': data['name']}}},
-                                    {'$addToSet': {'activities.$.' + decision: data['user']}})
+                          {'$addToSet': {'activities.$.' + decision: data['user']}})
 
 #> db.Trip.find({name : "york"}, {activities: {$elemMatch:{name:"Central Park"}}})
 
