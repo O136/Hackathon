@@ -1,13 +1,15 @@
 #!/usr/bin/env python
 
-from pymongo import MongoClient
 import bottle
+import re
+import pymongo
 from bson.json_util import dumps
 
 __author__ = 'oleg'
 
-client = MongoClient()
+client = pymongo.MongoClient()
 db = client.test
+
 
 # This route is the main page of the blog
 @bottle.route('/')
@@ -41,13 +43,16 @@ def get_user():
 def create_trip():
     collection = db['Trip']
     bottle.response.content_type = 'application/json'
-    data = bottle.request.json
+    data = bottle.request.json # the creator must also be
     try:
 
         try:
-            collection2 = db['SuggestedActivities']
+            activities = 'SuggestedActivities'
+            collection2 = db[('%s' % activities)]
             all_activities = []
             for i in collection2.find({'name': {'$in': data['activities']}}):
+                i['downs'] = []
+                i['ups'] = []
                 all_activities.append(i)
 
             data["activities"] = all_activities
@@ -66,52 +71,89 @@ def get_trips():
     collection = db['Trip']
     bottle.response.content_type = 'application/json'
     data = bottle.request.json
-    obj = collection.find(data)
+    obj = collection.find(data).sort({'start_date_timestamp':-1})
     return dumps(obj)
 
 
-@bottle.route('/get_trips_by_persons', method='POST')
+@bottle.route('/get_trips_by_person', method='POST')
 def get_trips():
     collection = db['Trip']
     bottle.response.content_type = 'application/json'
     data = bottle.request.json
-    obj = collection.find({'persons': {'$in': [data['email']]}}) #fara paranteze
+    obj = collection.find({'persons': {'$in': [data['email']]}}).sort('creation_timestamp', pymongo.DESCENDING)
     return dumps(obj)
 
 
 @bottle.route('/create_activity', method='POST')
 def create_activity():
-    collection = db['Activity']
+    collection = db['SuggestedActivities']
     bottle.response.content_type = 'application/json'
     data = bottle.request.json
+    data['ups'] = []
+    data['downs'] = []
     obj = collection.insert_one(data)
     return dumps(obj)
 
 
 @bottle.route('/get_activity', method='POST')
 def get_activity():
-    collection = db['Activity']
+    collection = db['SuggestedActivities']
     bottle.response.content_type = 'application/json'
     data = bottle.request.json
     obj = collection.find_one(data)
     return dumps(obj)
 
 
-@bottle.route('/update_activity', method='POST')
-def update_up():
-    collection = db['Trip']
+@bottle.route('/add_activity', method='POST')
+def add_activity():
     bottle.response.content_type = 'application/json'
     data = bottle.request.json
-    obj = collection.find_one({'name' : data['name'], 'ups': {'$exists': True}})
-
-   # db.Trip.update({name: "Hollywood"}, {$push:{"activities": {"name": "shooting", "ups": ["oleska"]}}})
 
 
-    if obj is not None: # if it has ups/downs update it, else
-        db['Trip'].update({'name': data['trip_name']}, {'$push':{'activities': { 'name': data['name'], 'ups': [data['user']]}}})
+    # obj = db['Trip'].update({'name': data['trip_name']},
+    #                         {'activities': { '$addToSet': { {'name': data['name'], decision: [data['user']]}}})
+
+    obj = db['Trip'].update({'name': data['trip_name']}, {'$addToSet': {'activities': data['name']}})
+
+    return dumps(obj)
+
+
+@bottle.route('/vote_activity', method='POST')
+def vote_activity():
+    bottle.response.content_type = 'application/json'
+    data = bottle.request.json
+    if data['ups'] == '1':
+        decision = 'ups'
     else:
-        pass
+        decision = 'downs'
 
+    db['Trip'].update_one({'name': data['trip_name'], 'activities': {'$elemMatch': {'name': data['name']}}},
+                                   {'$set': {'activities.$.ups': [], 'activities.$.downs': []}})
+
+    db['Trip'].update_one({'name': data['trip_name'], 'activities': {'$elemMatch': {'name': data['name']}}},
+                                    {'$addToSet': {'activities.$.' + decision: data['user']}})
+
+#> db.Trip.find({name : "york"}, {activities: {$elemMatch:{name:"Central Park"}}})
+
+    #name = activity name
+
+    return None
+
+
+@bottle.route('/search_users', method='POST')
+def search_users():
+    bottle.response.content_type = 'application/json'
+    data = bottle.request.json
+    p = '^' + data['pattern']
+    return dumps(db['Users'].find({'email': re.compile(p, re.IGNORECASE)}))
+
+
+@bottle.route('/find_friends', method='POST')
+def find_friends():
+    bottle.response.content_type = 'application/json'
+    data = bottle.request.json
+    collection = db['Users']
+    obj = collection.find({'email': {'$ne':data['email']}})
     return dumps(obj)
 
 
@@ -124,15 +166,13 @@ def get_suggested_activities():
     return dumps(obj)
 
 
-@bottle.route('/link_suggested_activities', method='POST')
-def link_suggested_activities():
+@bottle.route('/get_trip_activities_for_date', method='POST') # sorted !
+def get_suggested_activities():
     collection = db['Trip']
     bottle.response.content_type = 'application/json'
     data = bottle.request.json
     obj = collection.find({'destination': data['destination']})
     return dumps(obj)
-
-
 
 
 bottle.debug(True)
